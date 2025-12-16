@@ -26,11 +26,13 @@ fn format_tokens(count: u64) -> String {
     }
 }
 
-fn build_menu(app: &tauri::AppHandle, stats: &Stats) -> Menu<tauri::Wry> {
-    let input = format_tokens(stats.total_usage.input_tokens);
-    let output = format_tokens(stats.total_usage.output_tokens);
-    let cache_read = format_tokens(stats.total_usage.cache_read_input_tokens);
+fn make_progress_bar(percentage: f64, width: usize) -> String {
+    let filled = ((percentage / 100.0) * width as f64).round() as usize;
+    let empty = width.saturating_sub(filled);
+    format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
+}
 
+fn build_menu(app: &tauri::AppHandle, stats: &Stats) -> Menu<tauri::Wry> {
     let menu = Menu::new(app).unwrap();
 
     // Header
@@ -38,10 +40,48 @@ fn build_menu(app: &tauri::AppHandle, stats: &Stats) -> Menu<tauri::Wry> {
     menu.append(&header).unwrap();
 
     // Separator
-    let sep1 = MenuItem::new(app, "─────────────────", false, None::<&str>).unwrap();
+    let sep1 = MenuItem::new(app, "─────────────────────", false, None::<&str>).unwrap();
     menu.append(&sep1).unwrap();
 
-    // Stats
+    // Budget section
+    let budget_header = MenuItem::new(app, "⏱ 5h Rolling Budget", false, None::<&str>).unwrap();
+    menu.append(&budget_header).unwrap();
+
+    // Progress bar
+    let progress = make_progress_bar(stats.budget.percentage, 15);
+    let progress_text = format!("   {} {:.1}%", progress, stats.budget.percentage);
+    let progress_item = MenuItem::new(app, &progress_text, false, None::<&str>).unwrap();
+    menu.append(&progress_item).unwrap();
+
+    // Used / Remaining
+    let used_text = format!(
+        "   Used: {} / {}",
+        format_tokens(stats.budget.used),
+        format_tokens(stats.budget.limit)
+    );
+    let used_item = MenuItem::new(app, &used_text, false, None::<&str>).unwrap();
+    menu.append(&used_item).unwrap();
+
+    let remaining_text = format!("   Remaining: {}", format_tokens(stats.budget.remaining));
+    let remaining_item = MenuItem::new(app, &remaining_text, false, None::<&str>).unwrap();
+    menu.append(&remaining_item).unwrap();
+
+    // Reset time
+    if let Some(mins) = stats.budget.reset_minutes {
+        let reset_text = if mins >= 60 {
+            format!("   Resets in: {}h {}m", mins / 60, mins % 60)
+        } else {
+            format!("   Resets in: {}m", mins)
+        };
+        let reset_item = MenuItem::new(app, &reset_text, false, None::<&str>).unwrap();
+        menu.append(&reset_item).unwrap();
+    }
+
+    // Separator
+    let sep2 = MenuItem::new(app, "─────────────────────", false, None::<&str>).unwrap();
+    menu.append(&sep2).unwrap();
+
+    // Active sessions
     let active_text = format!(
         "Active: {} sessions, {} agents",
         stats.active_sessions, stats.active_agents
@@ -49,44 +89,67 @@ fn build_menu(app: &tauri::AppHandle, stats: &Stats) -> Menu<tauri::Wry> {
     let active = MenuItem::new(app, &active_text, false, None::<&str>).unwrap();
     menu.append(&active).unwrap();
 
-    let input_item = MenuItem::new(app, format!("Input: {} tokens", input), false, None::<&str>).unwrap();
+    // Separator
+    let sep3 = MenuItem::new(app, "─────────────────────", false, None::<&str>).unwrap();
+    menu.append(&sep3).unwrap();
+
+    // Total usage section
+    let total_header = MenuItem::new(app, "📊 Total Usage (All Time)", false, None::<&str>).unwrap();
+    menu.append(&total_header).unwrap();
+
+    let input_item = MenuItem::new(
+        app,
+        format!("   Input: {}", format_tokens(stats.total_usage.input_tokens)),
+        false,
+        None::<&str>,
+    )
+    .unwrap();
     menu.append(&input_item).unwrap();
 
-    let output_item = MenuItem::new(app, format!("Output: {} tokens", output), false, None::<&str>).unwrap();
+    let output_item = MenuItem::new(
+        app,
+        format!("   Output: {}", format_tokens(stats.total_usage.output_tokens)),
+        false,
+        None::<&str>,
+    )
+    .unwrap();
     menu.append(&output_item).unwrap();
 
-    let cache_item = MenuItem::new(app, format!("Cache Read: {} tokens", cache_read), false, None::<&str>).unwrap();
+    let cache_item = MenuItem::new(
+        app,
+        format!("   Cache: {}", format_tokens(stats.total_usage.cache_read_input_tokens)),
+        false,
+        None::<&str>,
+    )
+    .unwrap();
     menu.append(&cache_item).unwrap();
 
-    let msgs_item = MenuItem::new(app, format!("Messages: {}", stats.total_messages), false, None::<&str>).unwrap();
-    menu.append(&msgs_item).unwrap();
-
     // Separator
-    let sep2 = MenuItem::new(app, "─────────────────", false, None::<&str>).unwrap();
-    menu.append(&sep2).unwrap();
+    let sep4 = MenuItem::new(app, "─────────────────────", false, None::<&str>).unwrap();
+    menu.append(&sep4).unwrap();
 
     // Projects header
-    let proj_header = MenuItem::new(app, "Projects:", false, None::<&str>).unwrap();
+    let proj_header = MenuItem::new(app, "📁 Top Projects", false, None::<&str>).unwrap();
     menu.append(&proj_header).unwrap();
 
     // Top 3 projects
     for proj in stats.projects.iter().take(3) {
         let short_path = proj.path.split('/').last().unwrap_or(&proj.path);
-        let proj_text = format!("  {} - {}", short_path, format_tokens(proj.usage.total()));
+        let proj_text = format!("   {} - {}", short_path, format_tokens(proj.usage.total()));
         let proj_item = MenuItem::new(app, &proj_text, false, None::<&str>).unwrap();
         menu.append(&proj_item).unwrap();
     }
 
     // Separator
-    let sep3 = MenuItem::new(app, "─────────────────", false, None::<&str>).unwrap();
-    menu.append(&sep3).unwrap();
+    let sep5 = MenuItem::new(app, "─────────────────────", false, None::<&str>).unwrap();
+    menu.append(&sep5).unwrap();
 
     // Refresh
-    let refresh = MenuItem::with_id(app, "refresh", "Refresh", true, None::<&str>).unwrap();
+    let refresh = MenuItem::with_id(app, "refresh", "↻ Refresh", true, None::<&str>).unwrap();
     menu.append(&refresh).unwrap();
 
     // Open Dashboard
-    let dashboard = MenuItem::with_id(app, "dashboard", "Open Dashboard...", true, None::<&str>).unwrap();
+    let dashboard = MenuItem::with_id(app, "dashboard", "🌐 Open Dashboard...", true, None::<&str>).unwrap();
     menu.append(&dashboard).unwrap();
 
     // Quit
@@ -94,6 +157,11 @@ fn build_menu(app: &tauri::AppHandle, stats: &Stats) -> Menu<tauri::Wry> {
     menu.append(&quit).unwrap();
 
     menu
+}
+
+fn build_title(stats: &Stats) -> String {
+    // Show budget percentage in title
+    format!("{:.0}%", stats.budget.percentage)
 }
 
 fn main() {
@@ -107,17 +175,13 @@ fn main() {
             // Build initial menu
             let menu = build_menu(app.handle(), &stats);
 
-            // Create tray icon with dynamic title
-            let title = format!(
-                "{}↑ {}↓",
-                format_tokens(stats.total_usage.input_tokens),
-                format_tokens(stats.total_usage.output_tokens)
-            );
+            // Create tray icon with dynamic title showing budget %
+            let title = build_title(&stats);
 
             let _tray = TrayIconBuilder::with_id("main")
                 .menu(&menu)
                 .title(&title)
-                .tooltip("Claude Monitor")
+                .tooltip("Claude Monitor - Token Budget")
                 .on_menu_event(move |app, event| {
                     match event.id.as_ref() {
                         "quit" => {
@@ -125,22 +189,14 @@ fn main() {
                         }
                         "refresh" => {
                             if let Ok(new_stats) = get_stats() {
-                                // Update menu
                                 if let Some(tray) = app.tray_by_id("main") {
                                     let menu = build_menu(app, &new_stats);
                                     let _ = tray.set_menu(Some(menu));
-
-                                    let title = format!(
-                                        "{}↑ {}↓",
-                                        format_tokens(new_stats.total_usage.input_tokens),
-                                        format_tokens(new_stats.total_usage.output_tokens)
-                                    );
-                                    let _ = tray.set_title(Some(&title));
+                                    let _ = tray.set_title(Some(&build_title(&new_stats)));
                                 }
                             }
                         }
                         "dashboard" => {
-                            // Open web dashboard
                             let _ = open::that("http://localhost:3456");
                         }
                         _ => {}
@@ -153,18 +209,11 @@ fn main() {
                         ..
                     } = event
                     {
-                        // Refresh on click
                         if let Ok(new_stats) = get_stats() {
                             let app = tray.app_handle();
                             let menu = build_menu(app, &new_stats);
                             let _ = tray.set_menu(Some(menu));
-
-                            let title = format!(
-                                "{}↑ {}↓",
-                                format_tokens(new_stats.total_usage.input_tokens),
-                                format_tokens(new_stats.total_usage.output_tokens)
-                            );
-                            let _ = tray.set_title(Some(&title));
+                            let _ = tray.set_title(Some(&build_title(&new_stats)));
                         }
                     }
                 })
@@ -182,13 +231,7 @@ fn main() {
                         if let Some(tray) = app_handle.tray_by_id("main") {
                             let menu = build_menu(&app_handle, &new_stats);
                             let _ = tray.set_menu(Some(menu));
-
-                            let title = format!(
-                                "{}↑ {}↓",
-                                format_tokens(new_stats.total_usage.input_tokens),
-                                format_tokens(new_stats.total_usage.output_tokens)
-                            );
-                            let _ = tray.set_title(Some(&title));
+                            let _ = tray.set_title(Some(&build_title(&new_stats)));
                         }
                     }
                 }

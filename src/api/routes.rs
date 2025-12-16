@@ -24,6 +24,7 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/api/sessions", get(sessions_handler))
         .route("/api/refresh", get(refresh_handler))
         // HTMX partials
+        .route("/partials/budget", get(budget_partial_handler))
         .route("/partials/stats", get(stats_partial_handler))
         .route("/partials/sessions", get(sessions_partial_handler))
         // Static files
@@ -66,6 +67,13 @@ async fn refresh_handler(State(state): State<SharedState>) -> impl IntoResponse 
             (StatusCode::INTERNAL_SERVER_ERROR, "Refresh failed")
         }
     }
+}
+
+/// HTMX partial: Budget section
+async fn budget_partial_handler(State(state): State<SharedState>) -> impl IntoResponse {
+    let state = state.read().await;
+    let stats = state.get_stats();
+    Html(templates::render_budget_partial(&stats))
 }
 
 /// HTMX partial: Stats cards

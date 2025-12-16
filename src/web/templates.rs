@@ -53,6 +53,70 @@ pub fn render_index(stats: &Stats, active_sessions: &[&SessionData]) -> String {
             0%, 100% {{ opacity: 1; }}
             50% {{ opacity: 0.5; }}
         }}
+        .budget-section {{
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            border-radius: 16px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            border: 1px solid #334155;
+        }}
+        .budget-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }}
+        .budget-title {{
+            font-size: 1.25rem;
+            color: #f8fafc;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }}
+        .budget-percentage {{
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: #818cf8;
+        }}
+        .progress-container {{
+            background: #0f172a;
+            border-radius: 8px;
+            height: 24px;
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }}
+        .progress-bar {{
+            height: 100%;
+            border-radius: 8px;
+            transition: width 0.5s ease;
+        }}
+        .progress-bar.low {{ background: linear-gradient(90deg, #22c55e, #4ade80); }}
+        .progress-bar.medium {{ background: linear-gradient(90deg, #facc15, #fde047); }}
+        .progress-bar.high {{ background: linear-gradient(90deg, #f97316, #fb923c); }}
+        .progress-bar.critical {{ background: linear-gradient(90deg, #ef4444, #f87171); }}
+        .budget-stats {{
+            display: flex;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }}
+        .budget-stat {{
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }}
+        .budget-stat-label {{
+            font-size: 0.75rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }}
+        .budget-stat-value {{
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #f8fafc;
+        }}
+        .budget-stat-value.remaining {{ color: #22c55e; }}
         .stats-grid {{
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -153,9 +217,13 @@ pub fn render_index(stats: &Stats, active_sessions: &[&SessionData]) -> String {
     <div class="container">
         <div class="header">
             <h1>Claude Monitor</h1>
-            <button class="refresh-btn" hx-get="/api/refresh" hx-swap="none" hx-on::after-request="htmx.trigger('#stats-container', 'refresh'); htmx.trigger('#sessions-container', 'refresh');">
+            <button class="refresh-btn" hx-get="/api/refresh" hx-swap="none" hx-on::after-request="htmx.trigger('#budget-container', 'refresh'); htmx.trigger('#stats-container', 'refresh'); htmx.trigger('#sessions-container', 'refresh');">
                 Refresh
             </button>
+        </div>
+
+        <div id="budget-container" hx-get="/partials/budget" hx-trigger="load, refresh, every 10s" hx-swap="innerHTML">
+            {budget_html}
         </div>
 
         <div id="stats-container" hx-get="/partials/stats" hx-trigger="load, refresh, every 10s" hx-swap="innerHTML">
@@ -173,9 +241,74 @@ pub fn render_index(stats: &Stats, active_sessions: &[&SessionData]) -> String {
     </div>
 </body>
 </html>"#,
+        budget_html = render_budget_partial(stats),
         stats_html = render_stats_partial(stats),
         sessions_html = render_sessions_partial(active_sessions),
         projects_html = render_projects_list(stats),
+    )
+}
+
+/// Render budget section partial
+pub fn render_budget_partial(stats: &Stats) -> String {
+    let percentage = stats.budget.percentage;
+    let progress_class = if percentage < 50.0 {
+        "low"
+    } else if percentage < 75.0 {
+        "medium"
+    } else if percentage < 90.0 {
+        "high"
+    } else {
+        "critical"
+    };
+
+    let reset_text = stats
+        .budget
+        .reset_minutes
+        .map(|mins| {
+            if mins >= 60 {
+                format!("{}h {}m", mins / 60, mins % 60)
+            } else {
+                format!("{}m", mins)
+            }
+        })
+        .unwrap_or_else(|| "N/A".to_string());
+
+    format!(
+        r#"<div class="budget-section">
+    <div class="budget-header">
+        <div class="budget-title">
+            <span>5-Hour Rolling Budget</span>
+        </div>
+        <div class="budget-percentage">{percentage:.1}%</div>
+    </div>
+    <div class="progress-container">
+        <div class="progress-bar {progress_class}" style="width: {percentage}%;"></div>
+    </div>
+    <div class="budget-stats">
+        <div class="budget-stat">
+            <span class="budget-stat-label">Used</span>
+            <span class="budget-stat-value">{used}</span>
+        </div>
+        <div class="budget-stat">
+            <span class="budget-stat-label">Limit</span>
+            <span class="budget-stat-value">{limit}</span>
+        </div>
+        <div class="budget-stat">
+            <span class="budget-stat-label">Remaining</span>
+            <span class="budget-stat-value remaining">{remaining}</span>
+        </div>
+        <div class="budget-stat">
+            <span class="budget-stat-label">Resets In</span>
+            <span class="budget-stat-value">{reset}</span>
+        </div>
+    </div>
+</div>"#,
+        percentage = percentage,
+        progress_class = progress_class,
+        used = format_tokens(stats.budget.used),
+        limit = format_tokens(stats.budget.limit),
+        remaining = format_tokens(stats.budget.remaining),
+        reset = reset_text,
     )
 }
 

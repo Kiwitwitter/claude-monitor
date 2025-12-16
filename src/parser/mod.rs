@@ -1,5 +1,7 @@
 pub mod history;
 pub mod session;
 
-pub use history::HistoryEntry;
-pub use session::{SessionData, TokenUsage};
+pub use session::{
+    BudgetInfo, SessionData, TimestampedUsage, TokenUsage, DEFAULT_TOKEN_LIMIT,
+    ROLLING_WINDOW_HOURS,
+};

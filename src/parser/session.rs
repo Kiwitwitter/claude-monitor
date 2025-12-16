@@ -1,8 +1,14 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+
+/// Rolling window duration in hours (Max plan = 5 hours)
+pub const ROLLING_WINDOW_HOURS: i64 = 5;
+
+/// Default token limit for Max plan (approximately 45M tokens per 5-hour window)
+pub const DEFAULT_TOKEN_LIMIT: u64 = 45_000_000;
 
 /// Token usage data from a Claude Code message
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -25,6 +31,11 @@ impl TokenUsage {
     pub fn total(&self) -> u64 {
         self.total_input() + self.output_tokens
     }
+
+    /// Billable tokens (cache reads are usually free or discounted)
+    pub fn billable(&self) -> u64 {
+        self.input_tokens + self.output_tokens + self.cache_creation_input_tokens
+    }
 }
 
 impl std::ops::Add for TokenUsage {
@@ -45,6 +56,13 @@ impl std::ops::AddAssign for TokenUsage {
     fn add_assign(&mut self, other: Self) {
         *self = self.clone() + other;
     }
+}
+
+/// Token usage with timestamp for rolling window calculation
+#[derive(Debug, Clone)]
+pub struct TimestampedUsage {
+    pub timestamp: DateTime<Utc>,
+    pub usage: TokenUsage,
 }
 
 /// A message entry in a session
@@ -76,8 +94,51 @@ pub struct SessionData {
     pub is_agent: bool,
 }
 
-/// Parse a session JSONL file
-pub fn parse_session_file(path: &Path) -> Result<SessionData, Box<dyn std::error::Error>> {
+/// Budget information for the rolling window
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct BudgetInfo {
+    pub limit: u64,
+    pub used: u64,
+    pub remaining: u64,
+    pub percentage: f64,
+    pub window_hours: i64,
+    pub reset_minutes: Option<i64>,
+}
+
+impl BudgetInfo {
+    pub fn new(used: u64, limit: u64, oldest_timestamp: Option<DateTime<Utc>>) -> Self {
+        let remaining = limit.saturating_sub(used);
+        let percentage = if limit > 0 {
+            (used as f64 / limit as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let reset_minutes = oldest_timestamp.map(|ts| {
+            let expiry = ts + Duration::hours(ROLLING_WINDOW_HOURS);
+            let now = Utc::now();
+            if expiry > now {
+                (expiry - now).num_minutes()
+            } else {
+                0
+            }
+        });
+
+        Self {
+            limit,
+            used,
+            remaining,
+            percentage,
+            window_hours: ROLLING_WINDOW_HOURS,
+            reset_minutes,
+        }
+    }
+}
+
+/// Parse a session JSONL file and return session data plus timestamped usages
+pub fn parse_session_file(
+    path: &Path,
+) -> Result<(SessionData, Vec<TimestampedUsage>), Box<dyn std::error::Error>> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
 
@@ -95,7 +156,6 @@ pub fn parse_session_file(path: &Path) -> Result<SessionData, Box<dyn std::error
     }
     .to_string();
 
-    // Get project path from parent directory name
     let project_path = path
         .parent()
         .and_then(|p| p.file_name())
@@ -106,6 +166,7 @@ pub fn parse_session_file(path: &Path) -> Result<SessionData, Box<dyn std::error
     let mut usage = TokenUsage::default();
     let mut message_count = 0u32;
     let mut last_timestamp: Option<DateTime<Utc>> = None;
+    let mut timestamped_usages: Vec<TimestampedUsage> = Vec::new();
 
     for line in reader.lines() {
         let line = match line {
@@ -122,39 +183,51 @@ pub fn parse_session_file(path: &Path) -> Result<SessionData, Box<dyn std::error
             Err(_) => continue,
         };
 
-        // Count messages
         if entry.entry_type.as_deref() == Some("assistant")
             || entry.entry_type.as_deref() == Some("user")
         {
             message_count += 1;
         }
 
-        // Extract usage from assistant messages
+        // Parse timestamp
+        let timestamp = entry.timestamp.as_ref().and_then(|ts| {
+            DateTime::parse_from_rfc3339(ts)
+                .ok()
+                .map(|dt| dt.with_timezone(&Utc))
+        });
+
         if let Some(msg) = entry.message {
             if let Some(msg_usage) = msg.usage {
-                usage += msg_usage;
+                usage += msg_usage.clone();
+
+                // Store timestamped usage for rolling window calculation
+                if let Some(ts) = timestamp {
+                    timestamped_usages.push(TimestampedUsage {
+                        timestamp: ts,
+                        usage: msg_usage,
+                    });
+                }
             }
         }
 
-        // Track last timestamp
-        if let Some(ts) = entry.timestamp {
-            if let Ok(parsed) = DateTime::parse_from_rfc3339(&ts) {
-                let utc: DateTime<Utc> = parsed.into();
-                if last_timestamp.map(|lt| utc > lt).unwrap_or(true) {
-                    last_timestamp = Some(utc);
-                }
+        if let Some(ts) = timestamp {
+            if last_timestamp.map(|lt| ts > lt).unwrap_or(true) {
+                last_timestamp = Some(ts);
             }
         }
     }
 
-    Ok(SessionData {
-        session_id,
-        project_path,
-        usage,
-        message_count,
-        last_activity: last_timestamp,
-        is_agent,
-    })
+    Ok((
+        SessionData {
+            session_id,
+            project_path,
+            usage,
+            message_count,
+            last_activity: last_timestamp,
+            is_agent,
+        },
+        timestamped_usages,
+    ))
 }
 
 /// Check if a session is currently active (modified within last 5 minutes)
@@ -164,7 +237,7 @@ pub fn is_session_active(path: &Path) -> bool {
             let age = std::time::SystemTime::now()
                 .duration_since(modified)
                 .unwrap_or_default();
-            return age.as_secs() < 300; // 5 minutes
+            return age.as_secs() < 300;
         }
     }
     false

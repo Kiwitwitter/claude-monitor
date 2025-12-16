@@ -1,6 +1,9 @@
 use crate::config::Config;
-use crate::parser::{self, SessionData, TokenUsage};
-use chrono::{DateTime, Utc};
+use crate::parser::{
+    self, BudgetInfo, SessionData, TimestampedUsage, TokenUsage, DEFAULT_TOKEN_LIMIT,
+    ROLLING_WINDOW_HOURS,
+};
+use chrono::{DateTime, Duration, Utc};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
@@ -10,6 +13,7 @@ use std::fs;
 pub struct AppState {
     pub config: Config,
     pub sessions: HashMap<String, SessionData>,
+    pub timestamped_usages: Vec<TimestampedUsage>,
     pub last_refresh: Option<DateTime<Utc>>,
 }
 
@@ -17,6 +21,8 @@ pub struct AppState {
 #[derive(Debug, Clone, Serialize)]
 pub struct Stats {
     pub total_usage: TokenUsage,
+    pub rolling_usage: TokenUsage,
+    pub budget: BudgetInfo,
     pub active_sessions: u32,
     pub active_agents: u32,
     pub total_messages: u32,
@@ -36,6 +42,7 @@ impl AppState {
         Self {
             config: config.clone(),
             sessions: HashMap::new(),
+            timestamped_usages: Vec::new(),
             last_refresh: None,
         }
     }
@@ -43,6 +50,7 @@ impl AppState {
     /// Refresh all data from disk
     pub async fn refresh(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.sessions.clear();
+        self.timestamped_usages.clear();
 
         // Read all project directories
         if self.config.projects_dir.exists() {
@@ -65,12 +73,13 @@ impl AppState {
                     }
 
                     match parser::session::parse_session_file(&session_path) {
-                        Ok(session_data) => {
+                        Ok((session_data, timestamped)) => {
                             let key = format!(
                                 "{}:{}",
                                 session_data.project_path, session_data.session_id
                             );
                             self.sessions.insert(key, session_data);
+                            self.timestamped_usages.extend(timestamped);
                         }
                         Err(e) => {
                             tracing::warn!(
@@ -98,6 +107,7 @@ impl AppState {
         let mut project_map: HashMap<String, (TokenUsage, u32, u32)> = HashMap::new();
 
         let now = Utc::now();
+        let window_start = now - Duration::hours(ROLLING_WINDOW_HOURS);
 
         for session in self.sessions.values() {
             total_usage += session.usage.clone();
@@ -124,6 +134,22 @@ impl AppState {
             entry.2 += session.message_count;
         }
 
+        // Calculate rolling window usage
+        let mut rolling_usage = TokenUsage::default();
+        let mut oldest_in_window: Option<DateTime<Utc>> = None;
+
+        for tu in &self.timestamped_usages {
+            if tu.timestamp >= window_start {
+                rolling_usage += tu.usage.clone();
+                if oldest_in_window.map(|o| tu.timestamp < o).unwrap_or(true) {
+                    oldest_in_window = Some(tu.timestamp);
+                }
+            }
+        }
+
+        // Create budget info
+        let budget = BudgetInfo::new(rolling_usage.billable(), DEFAULT_TOKEN_LIMIT, oldest_in_window);
+
         let mut projects: Vec<ProjectStats> = project_map
             .into_iter()
             .map(|(path, (usage, session_count, message_count))| ProjectStats {
@@ -139,6 +165,8 @@ impl AppState {
 
         Stats {
             total_usage,
+            rolling_usage,
+            budget,
             active_sessions,
             active_agents,
             total_messages,

@@ -1,9 +1,16 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+
+/// Rolling window duration in hours (Max plan = 5 hours)
+const ROLLING_WINDOW_HOURS: i64 = 5;
+
+/// Default token limit for Max plan (this is an estimate, adjust as needed)
+/// Claude Max plan limit is approximately 45M tokens per 5-hour window
+const DEFAULT_TOKEN_LIMIT: u64 = 45_000_000;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TokenUsage {
@@ -23,6 +30,11 @@ impl TokenUsage {
             + self.output_tokens
             + self.cache_creation_input_tokens
             + self.cache_read_input_tokens
+    }
+
+    /// Billable tokens (cache reads are usually free or discounted)
+    pub fn billable(&self) -> u64 {
+        self.input_tokens + self.output_tokens + self.cache_creation_input_tokens
     }
 }
 
@@ -58,6 +70,13 @@ struct Message {
     usage: Option<TokenUsage>,
 }
 
+/// Token usage with timestamp for rolling window calculation
+#[derive(Debug, Clone)]
+struct TimestampedUsage {
+    timestamp: DateTime<Utc>,
+    usage: TokenUsage,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SessionData {
     pub session_id: String,
@@ -68,9 +87,58 @@ pub struct SessionData {
     pub is_agent: bool,
 }
 
+/// Budget information for the rolling window
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct BudgetInfo {
+    /// Token limit for the rolling window
+    pub limit: u64,
+    /// Tokens used in the rolling window
+    pub used: u64,
+    /// Remaining tokens
+    pub remaining: u64,
+    /// Usage percentage (0-100)
+    pub percentage: f64,
+    /// Rolling window duration in hours
+    pub window_hours: i64,
+    /// Time until oldest tokens expire (in minutes)
+    pub reset_minutes: Option<i64>,
+}
+
+impl BudgetInfo {
+    pub fn new(used: u64, limit: u64, oldest_timestamp: Option<DateTime<Utc>>) -> Self {
+        let remaining = limit.saturating_sub(used);
+        let percentage = if limit > 0 {
+            (used as f64 / limit as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let reset_minutes = oldest_timestamp.map(|ts| {
+            let expiry = ts + Duration::hours(ROLLING_WINDOW_HOURS);
+            let now = Utc::now();
+            if expiry > now {
+                (expiry - now).num_minutes()
+            } else {
+                0
+            }
+        });
+
+        Self {
+            limit,
+            used,
+            remaining,
+            percentage,
+            window_hours: ROLLING_WINDOW_HOURS,
+            reset_minutes,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct Stats {
     pub total_usage: TokenUsage,
+    pub rolling_usage: TokenUsage,
+    pub budget: BudgetInfo,
     pub active_sessions: u32,
     pub active_agents: u32,
     pub total_messages: u32,
@@ -100,7 +168,8 @@ fn get_claude_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".claude"))
 }
 
-fn parse_session_file(path: &Path) -> Option<SessionData> {
+/// Parse session file and return both total usage and timestamped usage entries
+fn parse_session_file(path: &Path) -> Option<(SessionData, Vec<TimestampedUsage>)> {
     let file = File::open(path).ok()?;
     let reader = BufReader::new(file);
 
@@ -124,6 +193,7 @@ fn parse_session_file(path: &Path) -> Option<SessionData> {
     let mut usage = TokenUsage::default();
     let mut message_count = 0u32;
     let mut last_timestamp: Option<DateTime<Utc>> = None;
+    let mut timestamped_usages: Vec<TimestampedUsage> = Vec::new();
 
     for line in reader.lines().flatten() {
         if line.trim().is_empty() {
@@ -141,30 +211,43 @@ fn parse_session_file(path: &Path) -> Option<SessionData> {
             message_count += 1;
         }
 
+        // Parse timestamp
+        let timestamp = entry.timestamp.as_ref().and_then(|ts| {
+            DateTime::parse_from_rfc3339(ts).ok().map(|dt| dt.with_timezone(&Utc))
+        });
+
         if let Some(msg) = entry.message {
             if let Some(msg_usage) = msg.usage {
-                usage += msg_usage;
+                usage += msg_usage.clone();
+
+                // Store timestamped usage for rolling window calculation
+                if let Some(ts) = timestamp {
+                    timestamped_usages.push(TimestampedUsage {
+                        timestamp: ts,
+                        usage: msg_usage,
+                    });
+                }
             }
         }
 
-        if let Some(ts) = entry.timestamp {
-            if let Ok(parsed) = DateTime::parse_from_rfc3339(&ts) {
-                let utc: DateTime<Utc> = parsed.into();
-                if last_timestamp.map(|lt| utc > lt).unwrap_or(true) {
-                    last_timestamp = Some(utc);
-                }
+        if let Some(ts) = timestamp {
+            if last_timestamp.map(|lt| ts > lt).unwrap_or(true) {
+                last_timestamp = Some(ts);
             }
         }
     }
 
-    Some(SessionData {
-        session_id,
-        project_path,
-        usage,
-        message_count,
-        last_activity: last_timestamp,
-        is_agent,
-    })
+    Some((
+        SessionData {
+            session_id,
+            project_path,
+            usage,
+            message_count,
+            last_activity: last_timestamp,
+            is_agent,
+        },
+        timestamped_usages,
+    ))
 }
 
 pub fn get_stats() -> Result<Stats, Box<dyn std::error::Error>> {
@@ -176,6 +259,7 @@ pub fn get_stats() -> Result<Stats, Box<dyn std::error::Error>> {
     }
 
     let mut sessions: Vec<SessionData> = Vec::new();
+    let mut all_timestamped_usages: Vec<TimestampedUsage> = Vec::new();
 
     for project_entry in fs::read_dir(&projects_dir)? {
         let project_entry = project_entry?;
@@ -193,8 +277,9 @@ pub fn get_stats() -> Result<Stats, Box<dyn std::error::Error>> {
                 continue;
             }
 
-            if let Some(session_data) = parse_session_file(&session_path) {
+            if let Some((session_data, timestamped_usages)) = parse_session_file(&session_path) {
                 sessions.push(session_data);
+                all_timestamped_usages.extend(timestamped_usages);
             }
         }
     }
@@ -207,6 +292,7 @@ pub fn get_stats() -> Result<Stats, Box<dyn std::error::Error>> {
     let mut project_map: HashMap<String, ProjectStats> = HashMap::new();
 
     let now = Utc::now();
+    let window_start = now - Duration::hours(ROLLING_WINDOW_HOURS);
 
     for session in &sessions {
         total_usage += session.usage.clone();
@@ -233,11 +319,29 @@ pub fn get_stats() -> Result<Stats, Box<dyn std::error::Error>> {
         entry.message_count += session.message_count;
     }
 
+    // Calculate rolling window usage
+    let mut rolling_usage = TokenUsage::default();
+    let mut oldest_in_window: Option<DateTime<Utc>> = None;
+
+    for tu in &all_timestamped_usages {
+        if tu.timestamp >= window_start {
+            rolling_usage += tu.usage.clone();
+            if oldest_in_window.map(|o| tu.timestamp < o).unwrap_or(true) {
+                oldest_in_window = Some(tu.timestamp);
+            }
+        }
+    }
+
+    // Create budget info
+    let budget = BudgetInfo::new(rolling_usage.billable(), DEFAULT_TOKEN_LIMIT, oldest_in_window);
+
     let mut projects: Vec<ProjectStats> = project_map.into_values().collect();
     projects.sort_by(|a, b| b.usage.total().cmp(&a.usage.total()));
 
     Ok(Stats {
         total_usage,
+        rolling_usage,
+        budget,
         active_sessions,
         active_agents,
         total_messages,
