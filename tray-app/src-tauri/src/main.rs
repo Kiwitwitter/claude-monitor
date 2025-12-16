@@ -145,10 +145,6 @@ fn build_menu(app: &tauri::AppHandle, stats: &Stats) -> Menu<tauri::Wry> {
     let sep5 = MenuItem::new(app, "─────────────────────", false, None::<&str>).unwrap();
     menu.append(&sep5).unwrap();
 
-    // Refresh
-    let refresh = MenuItem::with_id(app, "refresh", "↻ Refresh", true, None::<&str>).unwrap();
-    menu.append(&refresh).unwrap();
-
     // Open Dashboard
     let dashboard = MenuItem::with_id(app, "dashboard", "🌐 Open Dashboard...", true, None::<&str>).unwrap();
     menu.append(&dashboard).unwrap();
@@ -200,15 +196,6 @@ fn main() {
                     match event.id.as_ref() {
                         "quit" => {
                             app.exit(0);
-                        }
-                        "refresh" => {
-                            if let Ok(new_stats) = get_stats() {
-                                if let Some(tray) = app.tray_by_id("main") {
-                                    let menu = build_menu(app, &new_stats);
-                                    let _ = tray.set_menu(Some(menu));
-                                    let _ = tray.set_title(Some(&build_title(&new_stats)));
-                                }
-                            }
                         }
                         "dashboard" => {
                             let _ = app.shell().open("http://localhost:3456", None::<tauri_plugin_shell::open::Program>);
