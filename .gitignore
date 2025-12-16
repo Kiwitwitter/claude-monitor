@@ -1,5 +1,6 @@
 # Rust build artifacts
 /target/
+/tray-app/src-tauri/target/
 Cargo.lock
 
 # IDE
@@ -11,3 +12,6 @@ Cargo.lock
 
 # Logs
 *.log
+
+# Tauri generated
+/tray-app/src-tauri/gen/

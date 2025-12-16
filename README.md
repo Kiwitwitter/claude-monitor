@@ -1,6 +1,6 @@
 # Claude Monitor
 
-A local web dashboard to monitor your Claude Code usage in real-time.
+Monitor your Claude Code usage with a web dashboard and macOS menu bar app.
 
 ## Features
 
@@ -9,8 +9,11 @@ A local web dashboard to monitor your Claude Code usage in real-time.
 - Per-project usage statistics
 - Auto-refresh dashboard (every 10 seconds)
 - File watcher for live updates
+- **macOS Menu Bar App** - See stats at a glance
 
 ## Installation
+
+### Web Dashboard
 
 ```bash
 # Clone the repository
@@ -23,7 +26,21 @@ cargo build --release
 # The binary will be at ./target/release/claude-monitor
 ```
 
+### Menu Bar App (macOS)
+
+```bash
+cd tray-app
+cargo tauri build
+
+# Install the app
+cp -r src-tauri/target/release/bundle/macos/Claude\ Monitor.app /Applications/
+```
+
+Or download the DMG from the releases page.
+
 ## Usage
+
+### Web Dashboard
 
 ```bash
 # Start the monitor server
@@ -35,7 +52,14 @@ cargo run -- start --port 3456 --foreground
 
 Then open http://localhost:3456 in your browser.
 
-## Commands
+### Menu Bar App
+
+Just launch "Claude Monitor" from Applications. It will show:
+- Token usage in the menu bar (e.g., `57.7K↑ 22.2K↓`)
+- Click to see detailed stats
+- Auto-refreshes every 30 seconds
+
+## Commands (Web Dashboard)
 
 ```bash
 claude-monitor start [OPTIONS]    # Start the monitor server
@@ -64,9 +88,18 @@ Claude Monitor reads data from Claude Code's local storage at `~/.claude/`:
 
 ## Tech Stack
 
-- **Backend**: Rust + Axum
-- **Frontend**: HTMX + Vanilla CSS
+- **Web Backend**: Rust + Axum
+- **Web Frontend**: HTMX + Vanilla CSS
+- **Menu Bar App**: Tauri 2
 - **File Watching**: notify crate
+
+## Screenshots
+
+### Menu Bar
+The menu bar shows input/output token counts at a glance.
+
+### Dashboard
+A full web dashboard with detailed statistics and per-project breakdowns.
 
 ## License
 
