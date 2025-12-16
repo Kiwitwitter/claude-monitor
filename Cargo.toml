@@ -1,0 +1,24 @@
+[package]
+name = "claude-monitor"
+version = "0.1.0"
+edition = "2021"
+description = "Monitor Claude Code usage with a local web dashboard"
+authors = ["luka"]
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["full", "signal"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+notify = "6"
+notify-debouncer-mini = "0.4"
+askama = "0.12"
+askama_axum = "0.4"
+tower-http = { version = "0.5", features = ["fs", "cors"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+tokio-stream = "0.1"
+futures = "0.3"
