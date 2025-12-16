@@ -11,6 +11,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, RunEvent,
 };
+use tauri_plugin_shell::ShellExt;
 
 struct AppState {
     stats: Arc<Mutex<Stats>>,
@@ -197,7 +198,7 @@ fn main() {
                             }
                         }
                         "dashboard" => {
-                            let _ = open::that("http://localhost:3456");
+                            let _ = app.shell().open("http://localhost:3456", None::<tauri_plugin_shell::open::Program>);
                         }
                         _ => {}
                     }
