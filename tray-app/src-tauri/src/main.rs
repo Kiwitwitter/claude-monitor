@@ -183,7 +183,16 @@ fn main() {
             // Create tray icon with dynamic title showing budget %
             let title = build_title(&stats);
 
+            // Load tray icon (embedded at compile time)
+            let icon_bytes = include_bytes!("../icons/tray@2x.png");
+            let icon_image = image::load_from_memory(icon_bytes).expect("Failed to load tray icon");
+            let rgba = icon_image.to_rgba8();
+            let (width, height) = rgba.dimensions();
+            let icon = tauri::image::Image::new_owned(rgba.into_raw(), width, height);
+
             let _tray = TrayIconBuilder::with_id("main")
+                .icon(icon)
+                .icon_as_template(true)
                 .menu(&menu)
                 .title(&title)
                 .tooltip("Claude Monitor - Token Budget")
