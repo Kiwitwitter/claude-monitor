@@ -261,18 +261,6 @@ pub fn render_budget_partial(stats: &Stats) -> String {
         "critical"
     };
 
-    let reset_text = stats
-        .budget
-        .reset_minutes
-        .map(|mins| {
-            if mins >= 60 {
-                format!("{}h {}m", mins / 60, mins % 60)
-            } else {
-                format!("{}m", mins)
-            }
-        })
-        .unwrap_or_else(|| "N/A".to_string());
-
     format!(
         r#"<div class="budget-section">
     <div class="budget-header">
@@ -297,10 +285,6 @@ pub fn render_budget_partial(stats: &Stats) -> String {
             <span class="budget-stat-label">Remaining</span>
             <span class="budget-stat-value remaining">{remaining}</span>
         </div>
-        <div class="budget-stat">
-            <span class="budget-stat-label">Resets In</span>
-            <span class="budget-stat-value">{reset}</span>
-        </div>
     </div>
 </div>"#,
         percentage = percentage,
@@ -308,7 +292,6 @@ pub fn render_budget_partial(stats: &Stats) -> String {
         used = format_tokens(stats.budget.used),
         limit = format_tokens(stats.budget.limit),
         remaining = format_tokens(stats.budget.remaining),
-        reset = reset_text,
     )
 }
 

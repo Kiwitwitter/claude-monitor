@@ -102,6 +102,8 @@ pub struct BudgetInfo {
     pub window_hours: i64,
     /// Time until oldest tokens expire (in minutes)
     pub reset_minutes: Option<i64>,
+    /// Actual reset time (when oldest tokens expire)
+    pub reset_time: Option<DateTime<Utc>>,
 }
 
 impl BudgetInfo {
@@ -113,8 +115,9 @@ impl BudgetInfo {
             0.0
         };
 
-        let reset_minutes = oldest_timestamp.map(|ts| {
-            let expiry = ts + Duration::hours(ROLLING_WINDOW_HOURS);
+        let reset_time = oldest_timestamp.map(|ts| ts + Duration::hours(ROLLING_WINDOW_HOURS));
+
+        let reset_minutes = reset_time.map(|expiry| {
             let now = Utc::now();
             if expiry > now {
                 (expiry - now).num_minutes()
@@ -130,6 +133,7 @@ impl BudgetInfo {
             percentage,
             window_hours: ROLLING_WINDOW_HOURS,
             reset_minutes,
+            reset_time,
         }
     }
 }

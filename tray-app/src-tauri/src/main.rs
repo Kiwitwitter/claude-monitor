@@ -67,17 +67,6 @@ fn build_menu(app: &tauri::AppHandle, stats: &Stats) -> Menu<tauri::Wry> {
     let remaining_item = MenuItem::new(app, &remaining_text, false, None::<&str>).unwrap();
     menu.append(&remaining_item).unwrap();
 
-    // Reset time
-    if let Some(mins) = stats.budget.reset_minutes {
-        let reset_text = if mins >= 60 {
-            format!("   Resets in: {}h {}m", mins / 60, mins % 60)
-        } else {
-            format!("   Resets in: {}m", mins)
-        };
-        let reset_item = MenuItem::new(app, &reset_text, false, None::<&str>).unwrap();
-        menu.append(&reset_item).unwrap();
-    }
-
     // Separator
     let sep2 = MenuItem::new(app, "─────────────────────", false, None::<&str>).unwrap();
     menu.append(&sep2).unwrap();
