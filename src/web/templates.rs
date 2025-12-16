@@ -314,15 +314,21 @@ pub fn render_budget_partial(stats: &Stats) -> String {
 
 /// Render stats cards partial
 pub fn render_stats_partial(stats: &Stats) -> String {
+    let lifetime_total = stats.total_usage.total();
+
     format!(
         r#"<div class="stats-grid">
     <div class="stat-card">
-        <div class="stat-label">Total Input Tokens</div>
-        <div class="stat-value highlight">{input_tokens}</div>
+        <div class="stat-label">Lifetime Total Tokens</div>
+        <div class="stat-value highlight">{lifetime_total}</div>
     </div>
     <div class="stat-card">
-        <div class="stat-label">Total Output Tokens</div>
-        <div class="stat-value highlight">{output_tokens}</div>
+        <div class="stat-label">Lifetime Input</div>
+        <div class="stat-value">{input_tokens}</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-label">Lifetime Output</div>
+        <div class="stat-value">{output_tokens}</div>
     </div>
     <div class="stat-card">
         <div class="stat-label">Cache Created</div>
@@ -345,6 +351,7 @@ pub fn render_stats_partial(stats: &Stats) -> String {
         <div class="stat-value">{total_messages}</div>
     </div>
 </div>"#,
+        lifetime_total = format_tokens(lifetime_total),
         input_tokens = format_tokens(stats.total_usage.input_tokens),
         output_tokens = format_tokens(stats.total_usage.output_tokens),
         cache_created = format_tokens(stats.total_usage.cache_creation_input_tokens),
