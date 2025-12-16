@@ -167,6 +167,10 @@ fn build_title(stats: &Stats) -> String {
 
 fn main() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {
+            // Another instance tried to launch - we just ignore it
+            // The existing instance stays running
+        }))
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             // Initial stats
