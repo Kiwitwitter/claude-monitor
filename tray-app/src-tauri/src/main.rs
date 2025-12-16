@@ -243,8 +243,13 @@ fn main() {
         .expect("error while building tauri application");
 
     app.run(|_app_handle, event| {
-        if let RunEvent::ExitRequested { api, .. } = event {
-            api.prevent_exit();
+        // Only prevent exit when windows are closed, not when quit is explicitly called
+        if let RunEvent::ExitRequested { code, api, .. } = event {
+            // If code is Some, it's an explicit exit request (from app.exit())
+            // If code is None, it's from closing windows - prevent that
+            if code.is_none() {
+                api.prevent_exit();
+            }
         }
     });
 }
