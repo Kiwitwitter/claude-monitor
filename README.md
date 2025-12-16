@@ -7,7 +7,6 @@ A real-time monitoring tool for [Claude Code](https://claude.ai/code) usage. Tra
 ### Budget Tracking
 - **5-Hour Rolling Window**: Monitor your token budget based on Claude's Max plan limits
 - **Visual Progress Bar**: Color-coded usage indicator (green/yellow/orange/red)
-- **Reset Timer**: See when your oldest usage will expire from the rolling window
 
 ### Token Analytics
 - **Lifetime Statistics**: Total tokens used across all sessions
@@ -122,7 +121,6 @@ open /Applications/Claude\ Monitor.app
 2. **Click the Icon** to see:
    - 5-hour rolling budget progress bar
    - Used/Limit/Remaining tokens
-   - Reset timer (when oldest usage expires)
    - Active sessions and agents count
    - Lifetime token usage (input/output/cache)
    - Top 3 projects by usage
@@ -141,7 +139,7 @@ open /Applications/Claude\ Monitor.app
 - Shows budget usage percentage in the menu bar
 - Click icon to refresh and view detailed stats
 - 5-hour rolling budget with progress visualization
-- Used/remaining tokens and reset timer
+- Used/remaining tokens
 - Lifetime token breakdown (input/output/cache)
 - Top projects by usage
 - Quick link to open web dashboard
@@ -183,8 +181,7 @@ To start Claude Monitor automatically when you log in:
     "used": 1122399,
     "remaining": 43877601,
     "percentage": 2.49,
-    "window_hours": 5,
-    "reset_minutes": 224
+    "window_hours": 5
   },
   "active_sessions": 1,
   "active_agents": 0,
