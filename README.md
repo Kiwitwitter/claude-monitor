@@ -14,7 +14,7 @@ A local web dashboard to monitor your Claude Code usage in real-time.
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/claude-monitor.git
+git clone https://github.com/Kiwitwitter/claude-monitor.git
 cd claude-monitor
 
 # Build
